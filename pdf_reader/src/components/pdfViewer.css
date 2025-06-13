@@ -36,20 +36,20 @@
 .file-info {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 15px;
   flex: 1;
   justify-content: center;
 }
 
 .file-icon {
-  width: 20px;
-  height: 20px;
+  width: 22px;
+  height: 22px;
   color: #ff6b35;
 }
 
 .file-name {
-  font-weight: 500;
-  font-size: 16px;
+  font-weight: 350;
+  font-size: 19px;
 }
 
 .header-actions {
@@ -57,6 +57,20 @@
   align-items: center;
   gap: 12px;
 }
+
+.player-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 20px;
+}
+
+.player-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
 
 .action-button {
   display: flex;
@@ -98,7 +112,7 @@
 }
 
 .pdf-display-section {
-  flex: 1;
+  flex: 0 0 72%;
   padding: 24px;
   background-color: #1a1a1a;
 }
@@ -171,7 +185,7 @@
 }
 
 .audio-player-section {
-  width: 400px;
+  flex: 0 0 28%;
   background-color: #252525;
   border-left: 1px solid #333;
   display: flex;
@@ -200,7 +214,7 @@
 
 .player-title {
   font-size: 16px;
-  font-weight: 500;
+  font-weight: 400;
   margin: 0;
 }
 
@@ -208,10 +222,18 @@
   background: #333;
   border: 1px solid #555;
   color: white;
-  padding: 4px 8px;
-  border-radius: 4px;
-  font-size: 12px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: border-color 0.2s, background-color 0.2s;
 }
+
+.speed-select:hover {
+  border-color: #ff6b35;
+  background-color: rgba(32, 31, 31, 0.899);
+}
+
 
 .waveform-container {
   position: relative;
@@ -230,7 +252,7 @@
 
 .waveform-bar {
   flex: 1;
-  background-color: #555;
+  background-color: #555555;
   border-radius: 1px;
   transition: all 0.2s;
   min-height: 4px;

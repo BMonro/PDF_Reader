@@ -73,13 +73,7 @@ const PdfViewer = ({ uploadedFile, onBack }) => {
           <span className="file-name">{uploadedFile?.name || 'Document.pdf'}</span>
         </div>
         <div className="header-actions">
-          <button className="action-button">
-            <Settings className="action-icon" />
-          </button>
-          <button className="action-button download-btn">
-            <Download className="action-icon" />
-            <span>Download</span>
-          </button>
+          
         </div>
       </div>
 
@@ -122,22 +116,28 @@ const PdfViewer = ({ uploadedFile, onBack }) => {
         <div className="audio-player-section">
           <div className="audio-player">
             <div className="player-header">
-              <h3 className="player-title">Audio Version</h3>
-              <div className="playback-speed">
-                <select 
-                  value={playbackSpeed} 
-                  onChange={(e) => setPlaybackSpeed(parseFloat(e.target.value))}
-                  className="speed-select"
-                >
-                  <option value="0.5">0.5x</option>
-                  <option value="0.75">0.75x</option>
-                  <option value="1">1x</option>
-                  <option value="1.25">1.25x</option>
-                  <option value="1.5">1.5x</option>
-                  <option value="2">2x</option>
-                </select>
-              </div>
-            </div>
+  <h3 className="player-title">Full PDF Audio</h3>
+
+  <div className="player-actions">
+    <select 
+      value={playbackSpeed} 
+      onChange={(e) => setPlaybackSpeed(parseFloat(e.target.value))}
+      className="speed-select"
+    >
+      <option value="0.5">0.5x</option>
+      <option value="0.75">0.75x</option>
+      <option value="1">1x</option>
+      <option value="1.25">1.25x</option>
+      <option value="1.5">1.5x</option>
+      <option value="2">2x</option>
+    </select>
+
+    <button className="action-button download-btn">
+      <Download className="action-icon" />
+    </button>
+  </div>
+</div>
+
 
             {/* Waveform Visualization */}
             <div className="waveform-container">
@@ -178,13 +178,27 @@ const PdfViewer = ({ uploadedFile, onBack }) => {
           {/* Second Audio Track */}
           <div className="audio-player secondary">
             <div className="player-header">
-              <h3 className="player-title">Alternative Version</h3>
-              <div className="playback-speed">
-                <select className="speed-select">
-                  <option value="1">1x</option>
-                </select>
-              </div>
-            </div>
+              <h3 className="player-title">Gist PDF Audio</h3>
+
+  <div className="player-actions">
+    <select 
+      value={playbackSpeed} 
+      onChange={(e) => setPlaybackSpeed(parseFloat(e.target.value))}
+      className="speed-select"
+    >
+      <option value="0.5">0.5x</option>
+      <option value="0.75">0.75x</option>
+      <option value="1">1x</option>
+      <option value="1.25">1.25x</option>
+      <option value="1.5">1.5x</option>
+      <option value="2">2x</option>
+    </select>
+
+    <button className="action-button download-btn">
+      <Download className="action-icon" />
+    </button>
+  </div>
+</div>
 
             <div className="waveform-container">
               <div className="waveform">
@@ -220,13 +234,7 @@ const PdfViewer = ({ uploadedFile, onBack }) => {
         </div>
       </div>
 
-      {/* Additional Info Section */}
-      <div className="info-section">
-        <div className="conversion-info">
-          <h4>Conversion Complete</h4>
-          <p>Your PDF has been successfully converted to audio format with accessibility features enabled.</p>
-        </div>
-      </div>
+      
     </div>
   );
 };
