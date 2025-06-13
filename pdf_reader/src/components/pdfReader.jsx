@@ -3,8 +3,11 @@ import { Upload, FileText, Download, Sparkles, Droplet, DropletOffIcon, FileBox,
 import './pdfReader.css';
 import pdfImage from '../assets/icon.png';
 import PdfViewer from '../components/pdfViewer'; // Import the new component
+import supabase from '../supabaseClient';
 
 const PdfReader = () => {
+
+  console.log(supabase);
   const [isDragging, setIsDragging] = useState(false);
   const [uploadedFile, setUploadedFile] = useState(null);
   const [showViewer, setShowViewer] = useState(false);

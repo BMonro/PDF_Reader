@@ -1,22 +1,31 @@
 import { useEffect, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
-import PdfReader from './components/pdfReader'
-import './App.css'
+import PdfReader from './components/pdfReader';
+import './App.css';
 
-const supabase = createClient(import.meta.env.VITE_SUPABASE_URL, import.meta.env.VITE_SUPABASE_ANON_KEY);
+// Ініціалізація клієнта Supabase
+const supabase = createClient(
+  import.meta.env.VITE_SUPABASE_URL,
+  import.meta.env.VITE_SUPABASE_ANON_KEY
+);
 
 function App() {
-  const [instruments, setInstruments] = useState([]);
-  
+  const [documents, setDocuments] = useState([]);
+
   useEffect(() => {
-    getInstruments();
+    getDocuments();
   }, []);
-  
-  async function getInstruments() {
-    const { data } = await supabase.from("instruments").select();
-    setInstruments(data);
+
+  async function getDocuments() {
+    const { data, error } = await supabase.from("documents").select();
+    if (error) {
+      console.error("Помилка при отриманні документів:", error);
+    } else {
+      setDocuments(data);
+    }
   }
-  return <PdfReader />
+
+  return <PdfReader documents={documents} />;
 }
 
-export default App
+export default App;
