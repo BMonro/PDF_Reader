@@ -206,6 +206,7 @@ const PdfViewer = ({ uploadedFile, onBack }) => {
               </div>
             </div>
 
+
             <div className="player-controls">
               <div className="control-group">
                 <button className="control-button play-button">
