@@ -1,45 +1,116 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { ArrowLeft, Play, Pause, Volume2, Download, FileText, Settings } from 'lucide-react';
 import './pdfViewer.css';
+import supabase from '../supabaseClient'; // Імпорт клієнта Supabase
 
 const PdfViewer = ({ uploadedFile, onBack }) => {
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [currentTime, setCurrentTime] = useState(0);
-  const [duration, setDuration] = useState(180); // 3 minutes example
+  const [isPlayingFull, setIsPlayingFull] = useState(false); // Для повного аудіо
+  const [isPlayingSummary, setIsPlayingSummary] = useState(false); // Для скороченого аудіо
+  const [currentTimeFull, setCurrentTimeFull] = useState(0); // Час для повного аудіо
+  const [currentTimeSummary, setCurrentTimeSummary] = useState(0); // Час для скороченого аудіо
+  const [durationFull, setDurationFull] = useState(0); // Тривалість повного аудіо
+  const [durationSummary, setDurationSummary] = useState(0); // Тривалість скороченого аудіо
   const [volume, setVolume] = useState(0.7);
   const [playbackSpeed, setPlaybackSpeed] = useState(1);
   const [currentPage, setCurrentPage] = useState(1);
-  const [totalPages] = useState(5); // Example total pages
-  
-  const audioRef = useRef(null);
-  const progressRef = useRef(null);
+  const [totalPages] = useState(5); // Приклад, можна оновити з реальних даних PDF
+  const [analysisResult, setAnalysisResult] = useState(null); // Для зберігання результатів аналізу
 
-  // Simulate audio progress
+  const audioRefFull = useRef(null); // Ref для повного аудіо
+  const audioRefSummary = useRef(null); // Ref для скороченого аудіо
+  const progressRefFull = useRef(null);
+  const progressRefSummary = useRef(null);
+
+  // Завантаження даних після монтування компонента
   useEffect(() => {
-    let interval;
-    if (isPlaying) {
-      interval = setInterval(() => {
-        setCurrentTime(prev => {
-          if (prev >= duration) {
-            setIsPlaying(false);
+    const fetchAnalysis = async () => {
+      if (uploadedFile) {
+        const fileName = `${Date.now()}_${uploadedFile.name}`;
+        const { error: uploadError } = await supabase.storage
+          .from('pdf-files')
+          .upload(fileName, uploadedFile);
+
+        if (uploadError) {
+          console.error('Upload error:', uploadError.message);
+          return;
+        }
+
+        const { data, error } = await supabase.functions.invoke('pdf-processor', {
+          body: { filePath: fileName },
+        });
+
+        if (error) {
+          console.error('Function error:', error.message);
+          return;
+        }
+
+        setAnalysisResult(data);
+        if (data.fullAudioUrl) {
+          // Налаштування тривалості після завантаження аудіо
+          const audio = new Audio(data.fullAudioUrl);
+          audio.onloadedmetadata = () => setDurationFull(Math.floor(audio.duration));
+        }
+        if (data.summaryAudioUrl) {
+          const audio = new Audio(data.summaryAudioUrl);
+          audio.onloadedmetadata = () => setDurationSummary(Math.floor(audio.duration));
+        }
+      }
+    };
+
+    fetchAnalysis();
+  }, [uploadedFile]);
+
+  // Симуляція прогресу аудіо
+  useEffect(() => {
+    let intervalFull, intervalSummary;
+    if (isPlayingFull) {
+      intervalFull = setInterval(() => {
+        setCurrentTimeFull(prev => {
+          if (prev >= durationFull) {
+            setIsPlayingFull(false);
             return 0;
           }
           return prev + 1;
         });
       }, 1000);
     }
-    return () => clearInterval(interval);
-  }, [isPlaying, duration]);
+    if (isPlayingSummary) {
+      intervalSummary = setInterval(() => {
+        setCurrentTimeSummary(prev => {
+          if (prev >= durationSummary) {
+            setIsPlayingSummary(false);
+            return 0;
+          }
+          return prev + 1;
+        });
+      }, 1000);
+    }
+    return () => {
+      clearInterval(intervalFull);
+      clearInterval(intervalSummary);
+    };
+  }, [isPlayingFull, durationFull, isPlayingSummary, durationSummary]);
 
-  const togglePlayPause = () => {
-    setIsPlaying(!isPlaying);
+  const togglePlayPauseFull = () => {
+    setIsPlayingFull(!isPlayingFull);
   };
 
-  const handleProgressClick = (e) => {
+  const togglePlayPauseSummary = () => {
+    setIsPlayingSummary(!isPlayingSummary);
+  };
+
+  const handleProgressClickFull = (e) => {
     const rect = e.currentTarget.getBoundingClientRect();
     const clickX = e.clientX - rect.left;
-    const newTime = (clickX / rect.width) * duration;
-    setCurrentTime(newTime);
+    const newTime = (clickX / rect.width) * durationFull;
+    setCurrentTimeFull(newTime);
+  };
+
+  const handleProgressClickSummary = (e) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const clickX = e.clientX - rect.left;
+    const newTime = (clickX / rect.width) * durationSummary;
+    setCurrentTimeSummary(newTime);
   };
 
   const formatTime = (seconds) => {
@@ -48,7 +119,7 @@ const PdfViewer = ({ uploadedFile, onBack }) => {
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
-  const generateWaveformBars = (count = 50) => {
+  const generateWaveformBars = (count = 50, currentTime, duration) => {
     return Array.from({ length: count }, (_, i) => {
       const height = Math.random() * 40 + 10;
       const isActive = (i / count) <= (currentTime / duration);
@@ -72,9 +143,7 @@ const PdfViewer = ({ uploadedFile, onBack }) => {
           <FileText className="file-icon" />
           <span className="file-name">{uploadedFile?.name || 'Document.pdf'}</span>
         </div>
-        <div className="header-actions">
-          
-        </div>
+        <div className="header-actions"></div>
       </div>
 
       <div className="pdf-viewer-content">
@@ -90,18 +159,16 @@ const PdfViewer = ({ uploadedFile, onBack }) => {
                 </div>
               </div>
             </div>
-            
-            {/* Page Navigation */}
             <div className="page-navigation">
-              <button 
-                className="nav-button" 
+              <button
+                className="nav-button"
                 disabled={currentPage === 1}
                 onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
               >
                 Previous
               </button>
               <span className="page-counter">{currentPage} / {totalPages}</span>
-              <button 
+              <button
                 className="nav-button"
                 disabled={currentPage === totalPages}
                 onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
@@ -116,50 +183,47 @@ const PdfViewer = ({ uploadedFile, onBack }) => {
         <div className="audio-player-section">
           <div className="audio-player">
             <div className="player-header">
-  <h3 className="player-title">Full PDF Audio</h3>
-
-  <div className="player-actions">
-    <select 
-      value={playbackSpeed} 
-      onChange={(e) => setPlaybackSpeed(parseFloat(e.target.value))}
-      className="speed-select"
-    >
-      <option value="0.5">0.5x</option>
-      <option value="0.75">0.75x</option>
-      <option value="1">1x</option>
-      <option value="1.25">1.25x</option>
-      <option value="1.5">1.5x</option>
-      <option value="2">2x</option>
-    </select>
-
-    <button className="action-button download-btn">
-      <Download className="action-icon" />
-    </button>
-  </div>
-</div>
-
-
-            {/* Waveform Visualization */}
-            <div className="waveform-container">
-              <div className="waveform" onClick={handleProgressClick}>
-                {generateWaveformBars()}
+              <h3 className="player-title">Full PDF Audio</h3>
+              <div className="player-actions">
+                <select
+                  value={playbackSpeed}
+                  onChange={(e) => setPlaybackSpeed(parseFloat(e.target.value))}
+                  className="speed-select"
+                >
+                  <option value="0.5">0.5x</option>
+                  <option value="0.75">0.75x</option>
+                  <option value="1">1x</option>
+                  <option value="1.25">1.25x</option>
+                  <option value="1.5">1.5x</option>
+                  <option value="2">2x</option>
+                </select>
+                <a href={analysisResult?.fullAudioUrl} download>
+                  <button className="action-button download-btn">
+                    <Download className="action-icon" />
+                  </button>
+                </a>
               </div>
-              <div className="progress-line" style={{ width: `${(currentTime / duration) * 100}%` }} />
             </div>
-
-            {/* Player Controls */}
+            <div className="waveform-container">
+              <div className="waveform" onClick={handleProgressClickFull} ref={progressRefFull}>
+                {generateWaveformBars(50, currentTimeFull, durationFull)}
+              </div>
+              <div
+                className="progress-line"
+                style={{ width: `${(currentTimeFull / durationFull) * 100 || 0}%` }}
+              />
+            </div>
             <div className="player-controls">
               <div className="control-group">
-                <button className="control-button play-button" onClick={togglePlayPause}>
-                  {isPlaying ? <Pause size={24} /> : <Play size={24} />}
+                <button className="control-button play-button" onClick={togglePlayPauseFull}>
+                  {isPlayingFull ? <Pause size={24} /> : <Play size={24} />}
                 </button>
                 <div className="time-display">
-                  <span className="current-time">{formatTime(currentTime)}</span>
+                  <span className="current-time">{formatTime(currentTimeFull)}</span>
                   <span className="separator">/</span>
-                  <span className="total-time">{formatTime(duration)}</span>
+                  <span className="total-time">{formatTime(durationFull)}</span>
                 </div>
               </div>
-
               <div className="volume-control">
                 <Volume2 size={20} />
                 <input
@@ -173,52 +237,52 @@ const PdfViewer = ({ uploadedFile, onBack }) => {
                 />
               </div>
             </div>
+            <audio ref={audioRefFull} src={analysisResult?.fullAudioUrl} />
           </div>
 
-          {/* Second Audio Track */}
           <div className="audio-player secondary">
             <div className="player-header">
               <h3 className="player-title">Gist PDF Audio</h3>
-
-  <div className="player-actions">
-    <select 
-      value={playbackSpeed} 
-      onChange={(e) => setPlaybackSpeed(parseFloat(e.target.value))}
-      className="speed-select"
-    >
-      <option value="0.5">0.5x</option>
-      <option value="0.75">0.75x</option>
-      <option value="1">1x</option>
-      <option value="1.25">1.25x</option>
-      <option value="1.5">1.5x</option>
-      <option value="2">2x</option>
-    </select>
-
-    <button className="action-button download-btn">
-      <Download className="action-icon" />
-    </button>
-  </div>
-</div>
-
-            <div className="waveform-container">
-              <div className="waveform">
-                {generateWaveformBars(45)}
+              <div className="player-actions">
+                <select
+                  value={playbackSpeed}
+                  onChange={(e) => setPlaybackSpeed(parseFloat(e.target.value))}
+                  className="speed-select"
+                >
+                  <option value="0.5">0.5x</option>
+                  <option value="0.75">0.75x</option>
+                  <option value="1">1x</option>
+                  <option value="1.25">1.25x</option>
+                  <option value="1.5">1.5x</option>
+                  <option value="2">2x</option>
+                </select>
+                <a href={analysisResult?.summaryAudioUrl} download>
+                  <button className="action-button download-btn">
+                    <Download className="action-icon" />
+                  </button>
+                </a>
               </div>
             </div>
-
-
+            <div className="waveform-container">
+              <div className="waveform" onClick={handleProgressClickSummary} ref={progressRefSummary}>
+                {generateWaveformBars(45, currentTimeSummary, durationSummary)}
+              </div>
+              <div
+                className="progress-line"
+                style={{ width: `${(currentTimeSummary / durationSummary) * 100 || 0}%` }}
+              />
+            </div>
             <div className="player-controls">
               <div className="control-group">
-                <button className="control-button play-button">
-                  <Play size={24} />
+                <button className="control-button play-button" onClick={togglePlayPauseSummary}>
+                  {isPlayingSummary ? <Pause size={24} /> : <Play size={24} />}
                 </button>
                 <div className="time-display">
-                  <span className="current-time">0:00</span>
+                  <span className="current-time">{formatTime(currentTimeSummary)}</span>
                   <span className="separator">/</span>
-                  <span className="total-time">2:45</span>
+                  <span className="total-time">{formatTime(durationSummary)}</span>
                 </div>
               </div>
-
               <div className="volume-control">
                 <Volume2 size={20} />
                 <input
@@ -226,16 +290,16 @@ const PdfViewer = ({ uploadedFile, onBack }) => {
                   min="0"
                   max="1"
                   step="0.1"
-                  defaultValue="0.7"
+                  value={volume}
+                  onChange={(e) => setVolume(parseFloat(e.target.value))}
                   className="volume-slider"
                 />
               </div>
             </div>
+            <audio ref={audioRefSummary} src={analysisResult?.summaryAudioUrl} />
           </div>
         </div>
       </div>
-
-      
     </div>
   );
 };

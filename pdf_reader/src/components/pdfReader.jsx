@@ -2,15 +2,15 @@ import React, { useState } from 'react';
 import { Upload, FileText, Download, Sparkles, Droplet, DropletOffIcon, FileBox, BoomBoxIcon, Inbox } from 'lucide-react';
 import './pdfReader.css';
 import pdfImage from '../assets/icon.png';
-import PdfViewer from '../components/pdfViewer'; // Import the new component
+import PdfViewer from '../components/pdfViewer';
 import supabase from '../supabaseClient';
 
 const PdfReader = () => {
-
   console.log(supabase);
   const [isDragging, setIsDragging] = useState(false);
   const [uploadedFile, setUploadedFile] = useState(null);
   const [showViewer, setShowViewer] = useState(false);
+  const [analysisResult, setAnalysisResult] = useState(null);
 
   const handleDragOver = (e) => {
     e.preventDefault();
@@ -27,80 +27,97 @@ const PdfReader = () => {
     setIsDragging(false);
     const files = e.dataTransfer.files;
     if (files.length > 0) {
-      setUploadedFile(files[0]);
-      // Simulate processing delay then show viewer
-      setTimeout(() => {
-        setShowViewer(true);
-      }, 1500);
+      handleFileUpload(files[0]);
     }
   };
 
-  const handleFileSelect = (e) => {
+  const handleFileSelect = async (e) => {
     const files = e.target.files;
     if (files.length > 0) {
-      setUploadedFile(files[0]);
-      // Simulate processing delay then show viewer
-      setTimeout(() => {
-        setShowViewer(true);
-      }, 1500);
+      handleFileUpload(files[0]);
+    }
+  };
+
+  const handleFileUpload = async (file) => {
+    setUploadedFile(file);
+    const fileName = `${Date.now()}_${file.name
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-zA-Z0-9.]/g, '_')
+      .toLowerCase()}`;
+    console.log('Attempting to upload file:', fileName);
+    const { error: uploadError } = await supabase.storage
+      .from('pdf-files')
+      .upload(fileName, file, {
+        cacheControl: '3600',
+        upsert: false,
+      });
+    if (uploadError) {
+      console.error('Upload error:', uploadError.message, uploadError.details);
+      return;
+    }
+    console.log('File uploaded successfully:', fileName);
+    try {
+      const { data, error } = await supabase.functions.invoke('pdf-processor', {
+        body: { filePath: fileName },
+      });
+      if (error) {
+        console.error('Function error:', error.message, error.details);
+        return;
+      }
+      setAnalysisResult(data);
+      setShowViewer(true);
+    } catch (error) {
+      console.error('Network error:', error.message);
     }
   };
 
   const handleBackToUpload = () => {
     setShowViewer(false);
     setUploadedFile(null);
+    setAnalysisResult(null);
   };
 
-  // Show PDF Viewer if file is uploaded and processed
   if (showViewer && uploadedFile) {
-    return <PdfViewer uploadedFile={uploadedFile} onBack={handleBackToUpload} />;
+    return <PdfViewer uploadedFile={uploadedFile} onBack={handleBackToUpload} analysisResult={analysisResult} />;
   }
 
   return (
     <div className="app-container">
-      {/* Header */}
       <div className="header-section">
-        
         <div className="container">
           <div className="header-content">
             <div className="header-text">
-              <h1 className="main-title">
-                PDFs Without Barriers
-              </h1>
-              <p className="subtitle">
-                Analyze. Adapt. Use — without barriers.
-              </p>
+              <h1 className="main-title">PDFs Without Barriers</h1>
+              <p className="subtitle">Analyze. Adapt. Use — without barriers.</p>
             </div>
             <div className="pdf-icon">
-                <img src={pdfImage} alt="PDF Icon" className="icon" />
-                </div>
+              <img src={pdfImage} alt="PDF Icon" className="icon" />
+            </div>
           </div>
 
-          {/* About Section */}
           <div className="about-section">
             <div className="section-title-wrapper">
               <h2 className="section-title">About us</h2>
               <div className="title-line"></div>
             </div>
-            
             <div className="about-content">
               <p className="about-paragraph">
-                We believe that information should be accessible to everyone — regardless of ability. Our platform 
-                was created to help people overcome the barriers that can prevent them from accessing and processing digital content. 
-                Whether you're dealing with visual impairments, learning disabilities, or simply need a more accessible way to engage with PDFs, 
+                We believe that information should be accessible to everyone — regardless of ability. Our platform
+                was created to help people overcome the barriers that can prevent them from accessing and processing digital content.
+                Whether you're dealing with visual impairments, learning disabilities, or simply need a more accessible way to engage with PDFs,
                 our tool is designed to make content more inclusive and user-friendly.
               </p>
               <p className="about-paragraph">
-                Our mission is simple: to provide powerful, automated accessibility solutions that help users identify accessibility 
-                issues in PDF documents, generate comprehensive reports, and take actionable steps toward making content more inclusive — our 
+                Our mission is simple: to provide powerful, automated accessibility solutions that help users identify accessibility
+                issues in PDF documents, generate comprehensive reports, and take actionable steps toward making content more inclusive — our
                 platform helps you identify issues faster, easier, and more accurately than ever before.
               </p>
             </div>
           </div>
 
-          {/* Upload Section */}
           <div className="upload-section">
-            <div 
+            <div
               className={`upload-area ${isDragging ? 'dragging' : ''}`}
               onDragOver={handleDragOver}
               onDragLeave={handleDragLeave}
@@ -113,29 +130,20 @@ const PdfReader = () => {
                 className="file-input"
                 id="file-upload"
               />
-              
-              
               <div className="upload-content">
-
                 <div className="upload-actions">
                   <label htmlFor="file-upload" className="choose-file-btn">
                     Choose file
                   </label>
                 </div>
-                
                 <p className="drop-text">Or drop files here</p>
-
                 <div className="upload-icon-wrapper">
                   <div className="upload-icon">
                     <Inbox className="icon" />
                   </div>
                   <div className="upload-indicator"></div>
-                  
                 </div>
-                
-                
               </div>
-              
               {uploadedFile && !showViewer && (
                 <div className="file-uploaded">
                   <p className="uploaded-text">Processing: {uploadedFile.name}...</p>
@@ -144,12 +152,9 @@ const PdfReader = () => {
             </div>
           </div>
 
-          {/* How it works Section */}
           <div className="how-it-works">
             <h2 className="section-title-main">How it works</h2>
-            
             <div className="steps-container">
-              {/* Step 1 */}
               <div className="step">
                 <div className="step-icon-wrapper">
                   <div className="step-icon">
@@ -159,15 +164,11 @@ const PdfReader = () => {
                 </div>
                 <h3 className="step-title">Upload your document</h3>
               </div>
-
-              {/* Arrow 1 */}
               <div className="arrow">
                 <div className="arrow-line">
                   <div className="arrow-head"></div>
                 </div>
               </div>
-
-              {/* Step 2 */}
               <div className="step">
                 <div className="step-icon-wrapper">
                   <div className="step-icon">
@@ -177,15 +178,11 @@ const PdfReader = () => {
                 </div>
                 <h3 className="step-title">Convert your document</h3>
               </div>
-
-              {/* Arrow 2 */}
               <div className="arrow">
                 <div className="arrow-line">
                   <div className="arrow-head"></div>
                 </div>
               </div>
-
-              {/* Step 3 */}
               <div className="step">
                 <div className="step-icon-wrapper">
                   <div className="step-icon">
