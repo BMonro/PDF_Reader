@@ -11,22 +11,61 @@ const ttsApiKey = Deno.env.get('ELEVENLABS_API_KEY')!; // ElevenLabs API key
 const pdfcoApiKey = Deno.env.get('PDF_API_KEY')!;
 console.log('PDF.co API Key configured');
 
-serve(async (req: Request) => {
-  const headers = new Headers();
-  headers.append('Access-Control-Allow-Origin', 'http://localhost:5173');
-  headers.append('Access-Control-Allow-Methods', 'POST, OPTIONS');
-  headers.append('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-client-info, apikey');
+console.log('Request headers:', { 'x-api-key': pdfcoApiKey });
 
+// Helper function to create CORS headers
+function getCorsHeaders(origin: string | null) {
+  const headers = new Headers();
+  
+  // Allow multiple origins - adjust as needed
+  const allowedOrigins = [
+    'http://localhost:5173',
+    'http://localhost:3000',
+    'http://127.0.0.1:5173',
+    'http://127.0.0.1:3000'
+  ];
+  
+  // Check if the origin is allowed, or allow all for development
+  if (origin && allowedOrigins.includes(origin)) {
+    headers.set('Access-Control-Allow-Origin', origin);
+  } else {
+    // For development, you might want to allow all origins
+    // Remove this in production and use specific origins
+    headers.set('Access-Control-Allow-Origin', '*');
+  }
+  
+  headers.set('Access-Control-Allow-Methods', 'POST, GET, OPTIONS');
+  headers.set('Access-Control-Allow-Headers', 'Content-Type, Authorization, x-client-info, apikey, X-Requested-With');
+  headers.set('Access-Control-Max-Age', '86400'); // 24 hours
+  
+  return headers;
+}
+
+serve(async (req: Request) => {
+  const origin = req.headers.get('origin');
+  const headers = getCorsHeaders(origin);
+  
+  // Add content type for JSON responses
+  headers.set('Content-Type', 'application/json');
+
+  // Handle preflight OPTIONS request
   if (req.method === 'OPTIONS') {
-    return new Response(null, { status: 204, headers });
+    console.log('Handling OPTIONS preflight request from origin:', origin);
+    return new Response(null, { 
+      status: 200, // Use 200 instead of 204 for better compatibility
+      headers 
+    });
   }
 
-  console.log('Received request:', req.method, req.url);
+  console.log('Received request:', req.method, req.url, 'from origin:', origin);
 
   try {
     if (req.method !== 'POST') {
       console.log('Method not allowed:', req.method);
-      return new Response('Method not allowed', { status: 405, headers });
+      return new Response(
+        JSON.stringify({ error: 'Method not allowed' }), 
+        { status: 405, headers }
+      );
     }
 
     const { filePath } = await req.json();
@@ -40,7 +79,10 @@ serve(async (req: Request) => {
 
     if (fileError) {
       console.log('Storage download error:', fileError.message);
-      return new Response(JSON.stringify({ error: fileError.message }), { status: 400, headers });
+      return new Response(
+        JSON.stringify({ error: fileError.message }), 
+        { status: 400, headers }
+      );
     }
 
     const buffer = await fileData.arrayBuffer();
@@ -227,7 +269,10 @@ serve(async (req: Request) => {
 
     if (docError) {
       console.log('Document insert error:', docError.message);
-      return new Response(JSON.stringify({ error: docError.message }), { status: 500, headers });
+      return new Response(
+        JSON.stringify({ error: docError.message }), 
+        { status: 500, headers }
+      );
     }
 
     // Only insert audio records if audio was generated successfully
@@ -273,10 +318,7 @@ serve(async (req: Request) => {
       }),
       { 
         status: 200, 
-        headers: {
-          ...headers,
-          'Content-Type': 'application/json',
-        }
+        headers
       }
     );
 
@@ -287,10 +329,7 @@ serve(async (req: Request) => {
       JSON.stringify({ error: errorMessage }), 
       { 
         status: 500, 
-        headers: {
-          ...headers,
-          'Content-Type': 'application/json',
-        }
+        headers
       }
     );
   }
