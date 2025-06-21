@@ -5,9 +5,9 @@ const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
 const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 const supabase = createClient(supabaseUrl, supabaseKey);
 
-// Налаштування API
+// API Configuration
 const grokApiKey = Deno.env.get('GROK_API_KEY')!;
-const ttsApiKey = Deno.env.get('TTS_API_KEY')!; // Наприклад, ElevenLabs
+const ttsApiKey = Deno.env.get('ELEVENLABS_API_KEY')!; // ElevenLabs API key
 const pdfcoApiKey = Deno.env.get('PDF_API_KEY')!;
 console.log('PDF.co API Key configured');
 
@@ -32,7 +32,7 @@ serve(async (req: Request) => {
     const { filePath } = await req.json();
     console.log('Extracted filePath:', filePath);
 
-    // Завантажуємо файл з Supabase Storage
+    // Download file from Supabase Storage
     const { data: fileData, error: fileError } = await supabase.storage
       .from('pdf-files')
       .download(filePath);
@@ -46,13 +46,13 @@ serve(async (req: Request) => {
     const buffer = await fileData.arrayBuffer();
     console.log('File buffer created, size:', buffer.byteLength);
 
-    if (buffer.byteLength > 10 * 1024 * 1024) { // Перевірка розміру (10 MB)
+    if (buffer.byteLength > 10 * 1024 * 1024) { // 10 MB limit check
       throw new Error('File size exceeds 10 MB limit for PDF.co');
     }
 
     // === PDF.CO INTEGRATION ===
     
-    // 1. Отримуємо presigned URL для завантаження
+    // 1. Get presigned URL for upload
     const fileName = filePath.split('/').pop() || 'uploaded.pdf';
     const presignedResponse = await fetch(`https://api.pdf.co/v1/file/upload/get-presigned-url?contenttype=application/octet-stream&name=${encodeURIComponent(fileName)}`, {
       method: 'GET',
@@ -74,13 +74,13 @@ serve(async (req: Request) => {
     const uploadedFileUrl = presignedData.url;
     console.log('Presigned URL received:', uploadedFileUrl);
 
-    // 2. Завантажуємо файл до PDF.co (використовуємо PUT з raw binary data)
+    // 2. Upload file to PDF.co
     const uploadResponse = await fetch(uploadUrl, {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/octet-stream',
       },
-      body: buffer, // Передаємо raw ArrayBuffer
+      body: buffer,
     });
     
     console.log('PDF.co upload request completed, status:', uploadResponse.status);
@@ -91,16 +91,16 @@ serve(async (req: Request) => {
       throw new Error(`PDF.co upload failed with status ${uploadResponse.status}: ${errorText}`);
     }
 
-    // 3. Конвертуємо PDF в текст
+    // 3. Convert PDF to text
     const convertPayload = {
       name: fileName,
-      password: '', // Порожній пароль для незахищених документів
-      pages: '', // Порожня строка означає всі сторінки
+      password: '',
+      pages: '',
       url: uploadedFileUrl,
-      inline: true, // Отримати результат в JSON відповіді
-      async: false, // Синхронна обробка
-      ocr: true, // Активувати OCR для сканованих документів
-      ocrLanguage: 'eng', // Мова OCR
+      inline: true,
+      async: false,
+      ocr: true,
+      ocrLanguage: 'eng',
     };
 
     console.log('Converting PDF to text with payload:', convertPayload);
@@ -129,18 +129,14 @@ serve(async (req: Request) => {
       throw new Error(`PDF.co conversion error: ${convertResult.message}`);
     }
 
-    // Отримуємо текст
+    // Extract text
     let fullText = '';
     
-    // PDF.co може повертати текст у різних полях
     if (convertResult.body) {
-      // Найчастіше текст в полі body
       fullText = convertResult.body;
     } else if (convertResult.text) {
-      // Іноді в полі text
       fullText = convertResult.text;
     } else if (convertResult.url) {
-      // Якщо inline=false, треба завантажити текстовий файл
       const textResponse = await fetch(convertResult.url);
       if (!textResponse.ok) {
         throw new Error(`Failed to download converted text: ${textResponse.status}`);
@@ -150,55 +146,75 @@ serve(async (req: Request) => {
       throw new Error('No text content received from PDF.co');
     }
 
-    // Очищуємо текст від зайвих символів
+    // Clean up text
     fullText = fullText
-      .replace(/\\r\\n/g, '\n') // Замінюємо \\r\\n на звичайні переноси
-      .replace(/\\f/g, '') // Видаляємо символи форм-фіду
-      .replace(/\[Link\]/g, '') // Видаляємо мітки посилань
+      .replace(/\\r\\n/g, '\n')
+      .replace(/\\f/g, '')
+      .replace(/\[Link\]/g, '')
       .trim();
 
     console.log('PDF text extracted, length:', fullText.length);
     console.log('PDF text preview:', fullText.substring(0, 500));
 
-    // Перевіряємо якість витягнутого тексту
+    // Validate extracted text
     if (!fullText || fullText.trim().length === 0) {
       throw new Error('No text extracted from PDF, possibly due to OCR failure or empty document');
     }
 
-    // Перевіряємо, чи є текст осмисленим
     const meaningfulTextLength = fullText.replace(/[^a-zA-Zа-яА-Я0-9]/g, '').length;
     if (meaningfulTextLength < 50) {
       console.log('Warning: Very little meaningful text extracted');
-      // Але продовжуємо обробку, можливо це короткий документ
     }
 
-    // === ОБРОБКА ТЕКСТУ ===
+    // === TEXT PROCESSING ===
     
-    // Створюємо структуру документа
+    // Create document structure
     const structure = {
       headers: fullText.match(/^#+ .*/gm) || [],
       paragraphs: fullText.split('\n\n').filter((p: string) => p.trim().length > 50),
-      tables: [], // Можна додати логіку для виявлення таблиць
+      tables: [],
     };
     console.log('Structure extracted:', {
       headersCount: structure.headers.length,
       paragraphsCount: structure.paragraphs.length,
     });
 
-    // Генеруємо резюме
+    // Generate summary
     const summary = generateSummary(fullText);
     console.log('Summary created, length:', summary.length);
 
-    // Генеруємо аудіо
-    const fullAudio = await generateAudio(fullText.substring(0, 5000)); // Обмежуємо для демо
-    const fullAudioPath = await uploadAudio(fullAudio, filePath, 'full');
-    const fullDuration = 180;
+    // Generate audio with error handling
+    let fullAudioPath = '';
+    let summaryAudioPath = '';
+    let fullDuration = 0;
+    let summaryDuration = 0;
 
-    const summaryAudio = await generateAudio(summary);
-    const summaryAudioPath = await uploadAudio(summaryAudio, filePath, 'summary');
-    const summaryDuration = 120;
+    try {
+      // Validate TTS API key before making requests
+      if (!ttsApiKey || ttsApiKey.trim() === '') {
+        throw new Error('TTS_API_KEY environment variable is not set');
+      }
 
-    // Зберігаємо в базу даних
+      console.log('Generating full audio...');
+      const fullAudio = await generateAudio(fullText.substring(0, 5000));
+      fullAudioPath = await uploadAudio(fullAudio, filePath, 'full');
+      fullDuration = estimateAudioDuration(fullText.substring(0, 5000));
+
+      console.log('Generating summary audio...');
+      const summaryAudio = await generateAudio(summary);
+      summaryAudioPath = await uploadAudio(summaryAudio, filePath, 'summary');
+      summaryDuration = estimateAudioDuration(summary);
+
+    } catch (audioError) {
+      console.error('Audio generation failed:', audioError);
+      // Continue without audio - don't fail the entire process
+      fullAudioPath = '';
+      summaryAudioPath = '';
+      fullDuration = 0;
+      summaryDuration = 0;
+    }
+
+    // Save to database
     const { data: documentData, error: docError } = await supabase
       .from('documents')
       .insert({
@@ -214,15 +230,35 @@ serve(async (req: Request) => {
       return new Response(JSON.stringify({ error: docError.message }), { status: 500, headers });
     }
 
-    const { error: audioError } = await supabase.from('audio').insert([
-      { document_id: documentData.id, duration_sec: fullDuration, create_date: new Date().toISOString() },
-      { document_id: documentData.id, duration_sec: summaryDuration, create_date: new Date().toISOString() },
-    ]);
-    console.log('Audio insert attempt completed:', { audioError });
+    // Only insert audio records if audio was generated successfully
+    if (fullAudioPath || summaryAudioPath) {
+      const audioRecords = [];
+      if (fullAudioPath) {
+        audioRecords.push({
+          document_id: documentData.id,
+          duration_sec: fullDuration,
+          create_date: new Date().toISOString(),
+          audio_type: 'full'
+        });
+      }
+      if (summaryAudioPath) {
+        audioRecords.push({
+          document_id: documentData.id,
+          duration_sec: summaryDuration,
+          create_date: new Date().toISOString(),
+          audio_type: 'summary'
+        });
+      }
 
-    if (audioError) {
-      console.log('Audio insert error:', audioError.message);
-      return new Response(JSON.stringify({ error: audioError.message }), { status: 500, headers });
+      if (audioRecords.length > 0) {
+        const { error: audioError } = await supabase.from('audio').insert(audioRecords);
+        console.log('Audio insert attempt completed:', { audioError });
+
+        if (audioError) {
+          console.log('Audio insert error:', audioError.message);
+          // Don't fail the entire process for audio insert errors
+        }
+      }
     }
 
     console.log('Processing completed successfully');
@@ -233,6 +269,7 @@ serve(async (req: Request) => {
         fullAudioUrl: fullAudioPath,
         summaryAudioUrl: summaryAudioPath,
         textLength: fullText.length,
+        audioGenerated: !!(fullAudioPath || summaryAudioPath),
       }),
       { 
         status: 200, 
@@ -260,14 +297,12 @@ serve(async (req: Request) => {
 });
 
 function generateSummary(text: string): string {
-  // Простий алгоритм створення резюме
   const sentences = text.split(/[.!?]+/).filter(s => s.trim().length > 20);
   
   if (sentences.length <= 3) {
-    return text; // Якщо текст короткий, повертаємо його повністю
+    return text;
   }
 
-  // Беремо перше речення, середнє та останнє
   const summary = [
     sentences[0],
     sentences[Math.floor(sentences.length / 2)],
@@ -277,39 +312,71 @@ function generateSummary(text: string): string {
   return summary.length > 1000 ? summary.substring(0, 1000) + '...' : summary;
 }
 
+function estimateAudioDuration(text: string): number {
+  // Rough estimate: ~150 words per minute, ~5 characters per word
+  const wordCount = text.length / 5;
+  const minutes = wordCount / 150;
+  return Math.ceil(minutes * 60); // Return seconds
+}
+
 async function generateAudio(text: string): Promise<ArrayBuffer> {
-  // Обмежуємо довжину тексту для TTS
+  // Limit text length for TTS
   const maxLength = 5000;
   const truncatedText = text.length > maxLength ? text.substring(0, maxLength) + '...' : text;
   
   console.log('Generating audio for text length:', truncatedText.length);
+
+  // Validate API key
+  if (!ttsApiKey || ttsApiKey.trim() === '') {
+    throw new Error('TTS API key is not configured');
+  }
   
-  // Замініть на правильний voice ID з ElevenLabs
-  const voiceId = 'pNInz6obpgDQGcFmaJgB'; // Приклад voice ID
+  // Use a default voice ID - you should replace this with a valid one from your ElevenLabs account
+  const voiceId = 'pNInz6obpgDQGcFmaJgB';
+  
+  console.log('Making TTS API request...');
   
   const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
     method: 'POST',
     headers: { 
-      'xi-api-key': ttsApiKey, 
-      'Content-Type': 'application/json' 
+      'xi-api-key': ttsApiKey,
+      'Content-Type': 'application/json',
+      'Accept': 'audio/mpeg'
     },
     body: JSON.stringify({ 
       text: truncatedText,
       model_id: 'eleven_monolingual_v1',
       voice_settings: {
         stability: 0.5,
-        similarity_boost: 0.5
+        similarity_boost: 0.5,
+        style: 0.0,
+        use_speaker_boost: true
       }
     }),
   });
   
+  console.log('TTS API response status:', response.status);
+  
   if (!response.ok) {
     const errorText = await response.text();
-    console.log('TTS API error:', errorText);
-    throw new Error(`TTS API error: ${response.status} - ${errorText}`);
+    console.log('TTS API error response:', errorText);
+    
+    // Parse error details if available
+    let errorDetails = errorText;
+    try {
+      const errorJson = JSON.parse(errorText);
+      errorDetails = errorJson.detail?.message || errorJson.message || errorText;
+    } catch {
+      // Keep original error text if not JSON
+    }
+    
+    throw new Error(`TTS API error (${response.status}): ${errorDetails}`);
   }
   
-  return await response.arrayBuffer();
+  const audioBuffer = await response.arrayBuffer();
+  console.log('Audio generated successfully, size:', audioBuffer.byteLength);
+  
+  return audioBuffer;
 }
 
 async function uploadAudio(audio: ArrayBuffer, filePath: string, type: string): Promise<string> {
