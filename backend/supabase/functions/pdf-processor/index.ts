@@ -132,8 +132,12 @@ serve(async (req: Request) => {
     // Отримуємо текст
     let fullText = '';
     
-    if (convertResult.inline && convertResult.text) {
-      // Якщо inline=true, текст повертається прямо в відповіді
+    // PDF.co може повертати текст у різних полях
+    if (convertResult.body) {
+      // Найчастіше текст в полі body
+      fullText = convertResult.body;
+    } else if (convertResult.text) {
+      // Іноді в полі text
       fullText = convertResult.text;
     } else if (convertResult.url) {
       // Якщо inline=false, треба завантажити текстовий файл
@@ -146,10 +150,26 @@ serve(async (req: Request) => {
       throw new Error('No text content received from PDF.co');
     }
 
-    console.log('PDF text extracted, length:', fullText.length);
+    // Очищуємо текст від зайвих символів
+    fullText = fullText
+      .replace(/\\r\\n/g, '\n') // Замінюємо \\r\\n на звичайні переноси
+      .replace(/\\f/g, '') // Видаляємо символи форм-фіду
+      .replace(/\[Link\]/g, '') // Видаляємо мітки посилань
+      .trim();
 
+    console.log('PDF text extracted, length:', fullText.length);
+    console.log('PDF text preview:', fullText.substring(0, 500));
+
+    // Перевіряємо якість витягнутого тексту
     if (!fullText || fullText.trim().length === 0) {
       throw new Error('No text extracted from PDF, possibly due to OCR failure or empty document');
+    }
+
+    // Перевіряємо, чи є текст осмисленим
+    const meaningfulTextLength = fullText.replace(/[^a-zA-Zа-яА-Я0-9]/g, '').length;
+    if (meaningfulTextLength < 50) {
+      console.log('Warning: Very little meaningful text extracted');
+      // Але продовжуємо обробку, можливо це короткий документ
     }
 
     // === ОБРОБКА ТЕКСТУ ===
@@ -165,10 +185,8 @@ serve(async (req: Request) => {
       paragraphsCount: structure.paragraphs.length,
     });
 
-    // Генеруємо резюме (замініть на реальний API)
-    const summary = fullText.length > 1000 
-      ? fullText.substring(0, 1000) + '...' 
-      : fullText;
+    // Генеруємо резюме
+    const summary = generateSummary(fullText);
     console.log('Summary created, length:', summary.length);
 
     // Генеруємо аудіо
@@ -240,6 +258,24 @@ serve(async (req: Request) => {
     );
   }
 });
+
+function generateSummary(text: string): string {
+  // Простий алгоритм створення резюме
+  const sentences = text.split(/[.!?]+/).filter(s => s.trim().length > 20);
+  
+  if (sentences.length <= 3) {
+    return text; // Якщо текст короткий, повертаємо його повністю
+  }
+
+  // Беремо перше речення, середнє та останнє
+  const summary = [
+    sentences[0],
+    sentences[Math.floor(sentences.length / 2)],
+    sentences[sentences.length - 1]
+  ].join('. ') + '.';
+
+  return summary.length > 1000 ? summary.substring(0, 1000) + '...' : summary;
+}
 
 async function generateAudio(text: string): Promise<ArrayBuffer> {
   // Обмежуємо довжину тексту для TTS
