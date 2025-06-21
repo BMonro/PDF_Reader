@@ -9,10 +9,7 @@ const supabase = createClient(supabaseUrl, supabaseKey);
 const grokApiKey = Deno.env.get('GROK_API_KEY')!;
 const ttsApiKey = Deno.env.get('TTS_API_KEY')!; // Наприклад, ElevenLabs
 const pdfcoApiKey = Deno.env.get('PDF_API_KEY')!;
-console.log('PDF.co API Key (raw):', pdfcoApiKey);
-if (!pdfcoApiKey || pdfcoApiKey.length < 20) {
-  console.error('PDF.co API Key is invalid or too short!');
-}
+console.log('PDF.co API Key configured');
 
 serve(async (req: Request) => {
   const headers = new Headers();
@@ -35,6 +32,7 @@ serve(async (req: Request) => {
     const { filePath } = await req.json();
     console.log('Extracted filePath:', filePath);
 
+    // Завантажуємо файл з Supabase Storage
     const { data: fileData, error: fileError } = await supabase.storage
       .from('pdf-files')
       .download(filePath);
@@ -52,79 +50,129 @@ serve(async (req: Request) => {
       throw new Error('File size exceeds 10 MB limit for PDF.co');
     }
 
-    // Створення FormData для завантаження
-    const formData = new FormData();
-    const blob = new Blob([buffer], { type: 'application/pdf' });
-    formData.append('file', blob, 'uploaded.pdf');
-
-    // Завантаження файлу в PDF.co
-    const uploadResponse = await fetch('https://api.pdf.co/v1/file/upload', {
-      method: 'POST',
-      headers: {
-        'x-api-key': pdfcoApiKey,
-      },
-      body: formData,
+    // === PDF.CO INTEGRATION ===
+    
+    // 1. Отримуємо presigned URL для завантаження
+    const fileName = filePath.split('/').pop() || 'uploaded.pdf';
+    const presignedResponse = await fetch(`https://api.pdf.co/v1/file/upload/get-presigned-url?contenttype=application/octet-stream&name=${encodeURIComponent(fileName)}`, {
+      method: 'GET',
+      headers: { 'x-api-key': pdfcoApiKey },
     });
+    
+    if (!presignedResponse.ok) {
+      throw new Error(`Failed to get presigned URL: ${presignedResponse.status}`);
+    }
+    
+    const presignedData = await presignedResponse.json();
+    console.log('Presigned response:', presignedData);
+    
+    if (presignedData.error) {
+      throw new Error(`getPresignedUrl(): ${presignedData.message}`);
+    }
+    
+    const uploadUrl = presignedData.presignedUrl;
+    const uploadedFileUrl = presignedData.url;
+    console.log('Presigned URL received:', uploadedFileUrl);
+
+    // 2. Завантажуємо файл до PDF.co (використовуємо PUT з raw binary data)
+    const uploadResponse = await fetch(uploadUrl, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/octet-stream',
+      },
+      body: buffer, // Передаємо raw ArrayBuffer
+    });
+    
     console.log('PDF.co upload request completed, status:', uploadResponse.status);
+    
     if (!uploadResponse.ok) {
       const errorText = await uploadResponse.text();
       console.log('PDF.co upload error response:', errorText);
       throw new Error(`PDF.co upload failed with status ${uploadResponse.status}: ${errorText}`);
     }
-    const uploadResult = await uploadResponse.json();
-    const fileUrl = uploadResult.url;
-    console.log('PDF.co uploaded file URL:', fileUrl);
 
-    // Конвертація завантаженого файлу з детальним OCR
-    const pdfcoResponse = await fetch('https://api.pdf.co/v1/pdf/convert/to/text', {
+    // 3. Конвертуємо PDF в текст
+    const convertPayload = {
+      name: fileName,
+      password: '', // Порожній пароль для незахищених документів
+      pages: '', // Порожня строка означає всі сторінки
+      url: uploadedFileUrl,
+      inline: true, // Отримати результат в JSON відповіді
+      async: false, // Синхронна обробка
+      ocr: true, // Активувати OCR для сканованих документів
+      ocrLanguage: 'eng', // Мова OCR
+    };
+
+    console.log('Converting PDF to text with payload:', convertPayload);
+
+    const convertResponse = await fetch('https://api.pdf.co/v1/pdf/convert/to/text', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'x-api-key': pdfcoApiKey,
       },
-      body: JSON.stringify({
-        url: fileUrl,
-        pages: '0-', // Всі сторінки
-        async: false,
-        ocr: true, // Активувати OCR
-        ocrLanguage: 'eng', // Мова OCR (наприклад, англійська)
-        profiles: 'ocr-high', // Використання профілю для високої точності OCR
-      }),
+      body: JSON.stringify(convertPayload),
     });
-    console.log('PDF.co analysis request completed, status:', pdfcoResponse.status);
-    if (!pdfcoResponse.ok) {
-      const errorText = await pdfcoResponse.text();
-      console.log('PDF.co error response:', errorText);
-      throw new Error(`PDF.co analysis failed with status ${pdfcoResponse.status}: ${errorText}`);
+
+    console.log('PDF.co convert request completed, status:', convertResponse.status);
+    
+    if (!convertResponse.ok) {
+      const errorText = await convertResponse.text();
+      console.log('PDF.co convert error response:', errorText);
+      throw new Error(`PDF.co conversion failed with status ${convertResponse.status}: ${errorText}`);
     }
-    const result = await pdfcoResponse.json();
-    const fullText = result.text || '';
+
+    const convertResult = await convertResponse.json();
+    console.log('Convert result:', convertResult);
+
+    if (convertResult.error) {
+      throw new Error(`PDF.co conversion error: ${convertResult.message}`);
+    }
+
+    // Отримуємо текст
+    let fullText = '';
+    
+    if (convertResult.inline && convertResult.text) {
+      // Якщо inline=true, текст повертається прямо в відповіді
+      fullText = convertResult.text;
+    } else if (convertResult.url) {
+      // Якщо inline=false, треба завантажити текстовий файл
+      const textResponse = await fetch(convertResult.url);
+      if (!textResponse.ok) {
+        throw new Error(`Failed to download converted text: ${textResponse.status}`);
+      }
+      fullText = await textResponse.text();
+    } else {
+      throw new Error('No text content received from PDF.co');
+    }
+
     console.log('PDF text extracted, length:', fullText.length);
 
-    if (!fullText) {
+    if (!fullText || fullText.trim().length === 0) {
       throw new Error('No text extracted from PDF, possibly due to OCR failure or empty document');
     }
 
+    // === ОБРОБКА ТЕКСТУ ===
+    
+    // Створюємо структуру документа
     const structure = {
       headers: fullText.match(/^#+ .*/gm) || [],
-      paragraphs: fullText.split('\n\n').filter((p: string) => p.length > 50),
-      tables: [],
+      paragraphs: fullText.split('\n\n').filter((p: string) => p.trim().length > 50),
+      tables: [], // Можна додати логіку для виявлення таблиць
     };
-    console.log('Structure extracted:', structure);
-
-    const summaryResponse = await fetch('https://api.x.ai/grok/summarize', {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${grokApiKey}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: fullText }),
+    console.log('Structure extracted:', {
+      headersCount: structure.headers.length,
+      paragraphsCount: structure.paragraphs.length,
     });
-    console.log('Summary request completed, status:', summaryResponse.status);
-    if (!summaryResponse.ok) {
-      throw new Error(`Summary generation failed with status: ${summaryResponse.status}`);
-    }
-    const { summary } = await summaryResponse.json();
-    console.log('Summary extracted, length:', summary.length);
 
-    const fullAudio = await generateAudio(fullText);
+    // Генеруємо резюме (замініть на реальний API)
+    const summary = fullText.length > 1000 
+      ? fullText.substring(0, 1000) + '...' 
+      : fullText;
+    console.log('Summary created, length:', summary.length);
+
+    // Генеруємо аудіо
+    const fullAudio = await generateAudio(fullText.substring(0, 5000)); // Обмежуємо для демо
     const fullAudioPath = await uploadAudio(fullAudio, filePath, 'full');
     const fullDuration = 180;
 
@@ -132,10 +180,11 @@ serve(async (req: Request) => {
     const summaryAudioPath = await uploadAudio(summaryAudio, filePath, 'summary');
     const summaryDuration = 120;
 
+    // Зберігаємо в базу даних
     const { data: documentData, error: docError } = await supabase
       .from('documents')
       .insert({
-        filename: filePath.split('/').pop(),
+        filename: fileName,
         data_size: buffer.byteLength,
       })
       .select('id')
@@ -148,8 +197,8 @@ serve(async (req: Request) => {
     }
 
     const { error: audioError } = await supabase.from('audio').insert([
-      { document_id: documentData.id, duration_sec: fullDuration, create_date: new Date() },
-      { document_id: documentData.id, duration_sec: summaryDuration, create_date: new Date() },
+      { document_id: documentData.id, duration_sec: fullDuration, create_date: new Date().toISOString() },
+      { document_id: documentData.id, duration_sec: summaryDuration, create_date: new Date().toISOString() },
     ]);
     console.log('Audio insert attempt completed:', { audioError });
 
@@ -165,33 +214,87 @@ serve(async (req: Request) => {
         summary,
         fullAudioUrl: fullAudioPath,
         summaryAudioUrl: summaryAudioPath,
+        textLength: fullText.length,
       }),
-      { status: 200, headers }
+      { 
+        status: 200, 
+        headers: {
+          ...headers,
+          'Content-Type': 'application/json',
+        }
+      }
     );
+
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     console.error('Caught error:', errorMessage);
-    return new Response(JSON.stringify({ error: errorMessage }), { status: 500, headers });
+    return new Response(
+      JSON.stringify({ error: errorMessage }), 
+      { 
+        status: 500, 
+        headers: {
+          ...headers,
+          'Content-Type': 'application/json',
+        }
+      }
+    );
   }
 });
 
 async function generateAudio(text: string): Promise<ArrayBuffer> {
-  const response = await fetch('https://api.elevenlabs.io/v1/text-to-speech/voice-id', {
+  // Обмежуємо довжину тексту для TTS
+  const maxLength = 5000;
+  const truncatedText = text.length > maxLength ? text.substring(0, maxLength) + '...' : text;
+  
+  console.log('Generating audio for text length:', truncatedText.length);
+  
+  // Замініть на правильний voice ID з ElevenLabs
+  const voiceId = 'pNInz6obpgDQGcFmaJgB'; // Приклад voice ID
+  
+  const response = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
     method: 'POST',
-    headers: { 'xi-api-key': ttsApiKey, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ text }),
+    headers: { 
+      'xi-api-key': ttsApiKey, 
+      'Content-Type': 'application/json' 
+    },
+    body: JSON.stringify({ 
+      text: truncatedText,
+      model_id: 'eleven_monolingual_v1',
+      voice_settings: {
+        stability: 0.5,
+        similarity_boost: 0.5
+      }
+    }),
   });
-  if (!response.ok) throw new Error(`TTS API error: ${response.status}`);
+  
+  if (!response.ok) {
+    const errorText = await response.text();
+    console.log('TTS API error:', errorText);
+    throw new Error(`TTS API error: ${response.status} - ${errorText}`);
+  }
+  
   return await response.arrayBuffer();
 }
 
 async function uploadAudio(audio: ArrayBuffer, filePath: string, type: string): Promise<string> {
-  const audioFileName = `${filePath.split('/').pop()}_${type}.mp3`;
+  const audioFileName = `${filePath.split('/').pop()?.replace('.pdf', '')}_${type}_${Date.now()}.mp3`;
+  
+  console.log('Uploading audio file:', audioFileName);
+  
   const { error } = await supabase.storage
     .from('audio-files')
-    .upload(audioFileName, audio, { contentType: 'audio/mpeg' });
-  if (error) throw error;
+    .upload(audioFileName, audio, { 
+      contentType: 'audio/mpeg',
+      upsert: true 
+    });
+    
+  if (error) {
+    console.log('Audio upload error:', error.message);
+    throw error;
+  }
 
   const { data } = supabase.storage.from('audio-files').getPublicUrl(audioFileName);
+  console.log('Audio uploaded successfully:', data.publicUrl);
+  
   return data.publicUrl;
 }
