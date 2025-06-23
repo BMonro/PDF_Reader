@@ -287,7 +287,7 @@ const PdfViewer = ({ uploadedFile, onBack, analysisResult }) => {
           {analysisResult.fullAudioUrl && (
             <div className="audio-player">
               <div className="player-header">
-                <h3 className="player-title">Full version(audio)</h3>
+                <h3 className="player-title">Full version (audio)</h3>
                 <div className="player-actions">
                   <select
                     value={playbackSpeedFull}
@@ -349,7 +349,7 @@ const PdfViewer = ({ uploadedFile, onBack, analysisResult }) => {
           {analysisResult.summaryAudioUrl && (
             <div className="audio-player secondary">
               <div className="player-header">
-                <h3 className="player-title">Summary(audio)</h3>
+                <h3 className="player-title">Summary (audio)</h3>
                 <div className="player-actions">
                   <select
                     value={playbackSpeedSummary}
